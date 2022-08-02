@@ -29,9 +29,7 @@ class InvalidAwsAccountIdException(Exception):
 def valid_aws_account_number(host_id):
     parts = host_id.split("/")
     account_id = parts[len(parts)-2]
-    if len(account_id) == 12:
-        return True
-    return False
+    return len(account_id) == 12
 
 # Key derivation functions. See:
 # http://docs.aws.amazon.com/general/latest/gr/signature-v4-examples.html#signature-v4-examples-python
@@ -40,11 +38,10 @@ def sign(key, msg):
 
 
 def get_signature_key(key, dateStamp, regionName, serviceName):
-    kDate = sign(('AWS4' + key).encode('utf-8'), dateStamp)
+    kDate = sign(f'AWS4{key}'.encode('utf-8'), dateStamp)
     kRegion = sign(kDate, regionName)
     kService = sign(kRegion, serviceName)
-    kSigning = sign(kService, 'aws4_request')
-    return kSigning
+    return sign(kService, 'aws4_request')
 
 def get_aws_region():
     # return requests.get(AWS_AVAILABILITY_ZONE).text[:-1]
@@ -90,24 +87,39 @@ def create_canonical_request(amzdate, token, signed_headers, payload_hash):
     # Step 5: Create the canonical headers and signed headers. Header names
     # must be trimmed and lowercase, and sorted in code point order from
     # low to high. Note that there is a trailing \n.
-    canonical_headers = 'host:' + HOST + '\n' + 'x-amz-content-sha256:' + payload_hash + '\n' + 'x-amz-date:' + amzdate + '\n' + 'x-amz-security-token:' + token + '\n'
+    canonical_headers = (
+        f'host:{HOST}'
+        + '\n'
+        + 'x-amz-content-sha256:'
+        + payload_hash
+        + '\n'
+        + 'x-amz-date:'
+        + amzdate
+        + '\n'
+        + 'x-amz-security-token:'
+        + token
+        + '\n'
+    )
 
-    # Step 6: Create the list of signed headers. This lists the headers
-    # in the canonical_headers list, delimited with ";" and in alpha order.
-    # Note: The request can include any headers; canonical_headers and
-    # signed_headers lists those that you want to be included in the
-    # hash of the request. "Host" and "x-amz-date" are always required.
-    # signed_headers = 'host;x-amz-content-sha256;x-amz-date;x-amz-security-token'
 
-    # Step 7: Combine elements to create canonical request
-    canonical_request = METHOD + '\n' + canonical_uri + '\n' + canonical_querystring + '\n' + canonical_headers + '\n' + signed_headers + '\n' + payload_hash
-
-    return canonical_request
+    return (
+        METHOD
+        + '\n'
+        + canonical_uri
+        + '\n'
+        + canonical_querystring
+        + '\n'
+        + canonical_headers
+        + '\n'
+        + signed_headers
+        + '\n'
+        + payload_hash
+    )
 
 def create_conjur_iam_api_key(iam_role_name=None, access_key=None, secret_key=None, token=None):
     if iam_role_name is None:
         iam_role_name = get_iam_role_name()
-    
+
     if access_key is None and secret_key is None and token is None:
         access_key, secret_key, token = get_iam_role_metadata(iam_role_name)
 
@@ -131,7 +143,7 @@ def create_conjur_iam_api_key(iam_role_name=None, access_key=None, secret_key=No
     # Match the algorithm to the hashing algorithm you use, either SHA-1 or
     # SHA-256 (recommended)
     algorithm = 'AWS4-HMAC-SHA256'
-    credential_scope = datestamp + '/' + region + '/' + SERVICE + '/' + 'aws4_request'
+    credential_scope = f'{datestamp}/{region}/{SERVICE}/aws4_request'
     string_to_sign = algorithm + '\n' + amzdate + '\n' + credential_scope + '\n' + hashlib.sha256(canonical_request.encode('utf-8')).hexdigest()
 
     # ************* TASK 3: CALCULATE THE SIGNATURE *************
@@ -145,7 +157,8 @@ def create_conjur_iam_api_key(iam_role_name=None, access_key=None, secret_key=No
     # The signing information can be either in a query string value or in
     # a header named Authorization. This code shows how to use a header.
     # Create authorization header and add to request headers
-    authorization_header = algorithm + ' ' + 'Credential=' + access_key + '/' + credential_scope + ', ' + 'SignedHeaders=' + signed_headers + ', ' + 'Signature=' + signature
+    authorization_header = f'{algorithm} Credential={access_key}/{credential_scope}, SignedHeaders={signed_headers}, Signature={signature}'
+
 
     # The request can include any headers, but MUST include "host", "x-amz-date",
     # and (for this scenario) "Authorization". "host" and "x-amz-date" must
@@ -162,7 +175,7 @@ def create_conjur_iam_api_key(iam_role_name=None, access_key=None, secret_key=No
     }
 
     # ************* SEND THE REQUEST *************
-    return '{}'.format(headers).replace("'", '"')
+    return f'{headers}'.replace("'", '"')
 
 def get_conjur_iam_session_token(appliance_url, account, service_id, host_id, cert_file, iam_role_name=None, access_key=None, secret_key=None, token=None, ssl_verify=True):
     if not valid_aws_account_number(host_id):
@@ -171,15 +184,15 @@ def get_conjur_iam_session_token(appliance_url, account, service_id, host_id, ce
     appliance_url = appliance_url.rstrip("/")
     url = "{}/authn-iam/{}/{}/{}/authenticate".format(appliance_url, service_id, account, urllib.parse.quote(host_id, safe=''))
     iam_api_key = create_conjur_iam_api_key(iam_role_name, access_key, secret_key, token)
-    
+
     # If cert file is not provided then assume conjur is using valid certificate
-    if cert_file == None:
+    if cert_file is None:
         cert_file = True
 
     # If ssl_verify is explicitly false then ignore ssl certificate even if cert_file is set
     if not ssl_verify:
         cert_file = False
-    
+
     r = requests.post(url=url,data=iam_api_key,verify=cert_file)
 
     if r.status_code == 401:
@@ -216,7 +229,7 @@ def create_conjur_iam_client_from_env(iam_role_name=None, access_key=None, secre
             cert_file = os.environ['CONJUR_CERT_FILE']
         return create_conjur_iam_client(appliance_url, account, service_id, host_id, cert_file, iam_role_name, access_key, secret_key, token, ssl_verify)
     except KeyError as e:
-        raise KeyError("Failed to retrieve environment variable: {}".format(e))
+        raise KeyError(f"Failed to retrieve environment variable: {e}")
 
 
 # Examples of using methods:

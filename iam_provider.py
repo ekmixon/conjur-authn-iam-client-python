@@ -16,8 +16,8 @@ if __name__ == '__main__':
     variable_id = sys.argv[1]
     conjur_client = create_conjur_iam_client_from_env()
     value = conjur_client.get(variable_id)
-    if value == None or value == "":
-        write_and_flush(sys.stderr, '{} could not be retrieved'.format(variable_id))
+    if value is None or value == "":
+        write_and_flush(sys.stderr, f'{variable_id} could not be retrieved')
         sys.exit(1)
     write_and_flush(sys.stdout, value.decode('utf-8'))
 
